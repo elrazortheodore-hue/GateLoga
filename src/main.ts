@@ -434,7 +434,7 @@ document.getElementById('btn-upload')?.addEventListener('click', async () => {
                     })
                 });
                 const syncData = await syncResponse.json();
-                if (syncData.status !== "ACK") {
+                if (syncData.status !== "SUCCESS") {
                     throw new Error("Spreadsheet webhook synchronization declined.");
                 }
             }

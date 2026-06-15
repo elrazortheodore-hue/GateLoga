@@ -1,31 +1,28 @@
-/**
- * Google Apps Script Webhook receiver.
- * Intercepts HTTP POST requests, injects metadata (Cloudinary backups, batch stamps),
- * and dynamically appends rows to the spreadsheet.
- * 
- * Deployment Instructions:
- * 1. Open target Google Sheet.
- * 2. Extensions > Apps Script.
- * 3. Overwrite editor code with the javascript logic below.
- * 4. Deploy as Web App: Execute as "Me", Access: "Anyone".
- */
-
-function doPost(e: GoogleAppsScript.Events.DoPost) {
+function doPost(e) {
   const processLock = LockService.getScriptLock();
-  processLock.tryLock(10000); 
+  processLock.tryLock(10000);
 
   try {
     const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
     const incomingData = JSON.parse(e.postData.contents);
-    
+
     if (incomingData.rows && Array.isArray(incomingData.rows)) {
       let columnCount = activeSheet.getLastColumn();
-      let schemaHeaders: string[] = [];
+      let schemaHeaders = [];
+
       if (columnCount > 0) {
-        schemaHeaders = activeSheet.getRange(1, 1, 1, columnCount).getValues()[0] as string[];
+        schemaHeaders = activeSheet.getRange(1, 1, 1, columnCount).getValues()[0];
+      } else if (incomingData.rows.length > 0) {
+        // Bootstrap schema headers on a brand-new empty sheet
+        schemaHeaders = Object.keys(incomingData.rows[0]);
+        if (incomingData.imageUrl) schemaHeaders.push("Image Backup Link");
+        if (incomingData.docName) schemaHeaders.push("Batch Name");
+        schemaHeaders = [...new Set(schemaHeaders)];
+        activeSheet.getRange(1, 1, 1, schemaHeaders.length).setValues([schemaHeaders]);
+        activeSheet.getRange(1, 1, 1, schemaHeaders.length).setFontWeight("bold");
       }
 
-      incomingData.rows.forEach((record: Record<string, any>) => {
+      incomingData.rows.forEach((record) => {
         // Inject image link and doc batch metadata directly into the record keys
         if (incomingData.imageUrl) {
           record["Image Backup Link"] = incomingData.imageUrl;
@@ -33,34 +30,17 @@ function doPost(e: GoogleAppsScript.Events.DoPost) {
         if (incomingData.docName) {
           record["Batch Name"] = incomingData.docName;
         }
-        if (typeof incomingData.pageIndex === 'number') {
-          record["Page Number"] = incomingData.pageIndex + 1;
-        }
 
-        // Dynamically add new columns to the header schema if they don't exist
-        Object.keys(record).forEach(field => {
-          if (!schemaHeaders.includes(field)) {
-            schemaHeaders.push(field);
-            activeSheet.getRange(1, schemaHeaders.length).setValue(field);
-            activeSheet.getRange(1, schemaHeaders.length).setFontWeight("bold");
-          }
-        });
-
-        // Compile row cells according to header positions
-        const compiledRow = new Array(schemaHeaders.length).fill("");
-        Object.entries(record).forEach(([field, val]) => {
-          const indexPosition = schemaHeaders.indexOf(field);
-          compiledRow[indexPosition] = typeof val === 'object' ? JSON.stringify(val) : val; 
-        });
-
-        activeSheet.appendRow(compiledRow);
+        // Map record object to spreadsheet columns
+        let rowData = schemaHeaders.map(header => record[header] || "");
+        activeSheet.appendRow(rowData);
       });
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ status: "ACK" }))
+    return ContentService.createTextOutput(JSON.stringify({ status: "SUCCESS" }))
       .setMimeType(ContentService.MimeType.JSON);
-      
-  } catch (err: any) {
+
+  } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ status: "ERR", detail: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   } finally {
