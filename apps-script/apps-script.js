@@ -135,7 +135,9 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ 
       status: "SUCCESS", 
       rowsSynced: incomingData.rows.length,
-      warnings: lockWarning || undefined
+      warnings: lockWarning || undefined,
+      echoed: incomingData,
+      rawPostData: e.postData.contents
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
