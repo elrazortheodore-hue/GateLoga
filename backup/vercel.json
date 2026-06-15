@@ -1,0 +1,10 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "routes": [
+    {
+      "src": "/sheets",
+      "dest": "/sheets/index.html"
+    }
+  ]
+}

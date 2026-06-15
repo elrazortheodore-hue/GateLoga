@@ -1,0 +1,9 @@
+gateloga/
+├── public/
+│   ├── index.html          # Main ingestion portal (Root)
+│   └── sheets/
+│       └── index.html      # Redirection node for the spreadsheet
+├── .env                    # Environment variables
+├── vercel.json             # Deployment configuration
+├── apps-script.js          # Google Sheets Webhook logic
+└── README.md               # Core documentation
