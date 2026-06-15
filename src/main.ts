@@ -1,7 +1,6 @@
 // ================================================================
 // SYSTEM ENVIRONMENT CONFIGURATION
 // ================================================================
-const WEBHOOK_URL: string = import.meta.env.VITE_WEBHOOK_URL || "";
 const CLOUDINARY_API_KEY: string = import.meta.env.VITE_CLOUDINARY_API_KEY || "";
 const CLOUDINARY_API_SECRET: string = import.meta.env.VITE_CLOUDINARY_API_SECRET || "";
 const CLOUDINARY_CLOUD_NAME: string = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
@@ -13,10 +12,6 @@ let currentFile: File | null = null;
 let currentRotation = 0;
 let captureMode: 'camera' | 'file' = 'camera';
 let objectUrlsToRevoke: string[] = [];
-
-interface GeminiRow {
-    [key: string]: string | number | boolean;
-}
 
 // Custom alert toast system
 function showAlert(message: string): void {
@@ -357,32 +352,7 @@ async function uploadToCloudinary(fileObject: File): Promise<string> {
     return data.secure_url;
 }
 
-// Upload raw File straight to Vercel Gemini Serverless proxy endpoint
-async function uploadToGemini(fileObject: File): Promise<GeminiRow[]> {
-    const endpoint = `/api/gemini`;
-    const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-            "Content-Type": fileObject.type
-        },
-        body: fileObject // Send raw binary image payload
-    });
-
-    if (!res.ok) {
-        const errData = await res.json();
-        const msg = errData.error?.message || "AI Server Processing Failed";
-        // Check for server-side auth error code and raise flag
-        if (res.status === 401 || res.status === 403 || (msg && msg.includes("API key"))) {
-            throw new Error(`FATAL_AUTH: ${msg}`);
-        }
-        throw new Error(msg);
-    }
-
-    const data = await res.json();
-    return data.rows || [];
-}
-
-// Ingestion Processing Sequence (Direct Upload, no PIN code modal required)
+// // Ingestion Processing Sequence (Direct Cloudinary Upload & Register As Pending)
 document.getElementById('btn-upload')?.addEventListener('click', async () => {
     if (scannedImages.length === 0) return;
 
@@ -394,13 +364,13 @@ document.getElementById('btn-upload')?.addEventListener('click', async () => {
     if (btnUpload) btnUpload.disabled = true;
     if (progressEl) progressEl.classList.add('show');
     
-    let synchronizationFailures = 0;
+    let uploadFailures = 0;
     const docName = (document.getElementById('doc-name-input') as HTMLInputElement)?.value.trim() || 'LOG_BATCH';
 
     for (let i = 0; i < scannedImages.length; i++) {
         // Calculate monotonic increments
         const progressBase = (i / scannedImages.length) * 100;
-        const progressAnalysis = ((i + 0.5) / scannedImages.length) * 100;
+        const progressRegister = ((i + 0.5) / scannedImages.length) * 100;
         const progressSync = ((i + 1) / scannedImages.length) * 100;
 
         const targetFile = scannedImages[i];
@@ -412,51 +382,38 @@ document.getElementById('btn-upload')?.addEventListener('click', async () => {
             // 1. Cloudinary upload (direct raw file)
             const cloudinaryUrl = await uploadToCloudinary(targetFile);
 
-            if (textEl) textEl.textContent = `Extracting page ${i + 1} of ${scannedImages.length} via Gemini server...`;
-            if (fillEl) fillEl.style.width = `${progressAnalysis}%`;
+            if (textEl) textEl.textContent = `Registering page ${i + 1} of ${scannedImages.length} in database...`;
+            if (fillEl) fillEl.style.width = `${progressRegister}%`;
 
-            // 2. Proxy processing via Vercel Serverless Function
-            const extractedRows = await uploadToGemini(targetFile);
+            // 2. Call Vercel /api/add_pending to queue the scan
+            const registerResponse = await fetch("/api/add_pending", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    imageUrl: cloudinaryUrl,
+                    docName: docName
+                })
+            });
 
-            if (textEl) textEl.textContent = `Streaming page ${i + 1} to database...`;
+            if (!registerResponse.ok) {
+                const errData = await registerResponse.json();
+                throw new Error(errData.error || "Database registration failed.");
+            }
+
             if (fillEl) fillEl.style.width = `${progressSync}%`;
 
-            // 3. Post data & Cloudinary URL to Google Sheets database webhook
-            if (extractedRows.length > 0) {
-                const syncResponse = await fetch(WEBHOOK_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "text/plain;charset=utf-8" },
-                    body: JSON.stringify({
-                        rows: extractedRows,
-                        imageUrl: cloudinaryUrl,
-                        docName: docName,
-                        pageIndex: i
-                    })
-                });
-                const syncData = await syncResponse.json();
-                if (syncData.status !== "SUCCESS") {
-                    throw new Error("Spreadsheet webhook synchronization declined.");
-                }
-            }
-
         } catch (err: any) {
-            console.error("Synchronization execution error:", err);
-            synchronizationFailures++;
-            
-            if (err.message && err.message.startsWith("FATAL_AUTH")) {
-                const clearMsg = err.message.replace("FATAL_AUTH: ", "");
-                if (textEl) textEl.textContent = `Fatal API error: ${clearMsg}`;
-                showAlert(`Fatal API authentication failure: ${clearMsg}. Synchronization aborted.`);
-                break; // Break loop immediately on credentials failure
-            }
+            console.error("Upload execution error:", err);
+            uploadFailures++;
+            showAlert(`Page ${i + 1} failed: ${err.message || err}`);
         }
     }
 
     if (textEl) {
-        if (synchronizationFailures > 0) {
-            textEl.textContent = `Completed with ${synchronizationFailures} error(s).`;
+        if (uploadFailures > 0) {
+            textEl.textContent = `Completed with ${uploadFailures} failure(s).`;
         } else {
-            textEl.textContent = 'All records synchronized successfully.';
+            textEl.textContent = 'All logbook pages uploaded successfully.';
         }
     }
     
