@@ -1,3 +1,9 @@
+/**
+ * Gateloga Google Sheets Database Webhook.
+ * Handles row insertion and dynamic schema bootstrapping on empty sheets.
+ * Active Web App URL:
+ * https://script.google.com/macros/s/AKfycbzDQpIGC2GltWESNPtuUxFi2u7sL5l0TMYJpoaXNEhdE3vcr7Ee72lBmwA1XoO9UfLVOw/exec
+ */
 function doPost(e) {
   const processLock = LockService.getScriptLock();
   processLock.tryLock(10000);
